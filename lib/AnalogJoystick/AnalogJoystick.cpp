@@ -1,24 +1,24 @@
-//
-// Created by Vlad on 20.01.2022.
-//
-
 #include "AnalogJoystick.h"
-
-
-void AnalogJoystick::init (uint8_t x, uint8_t y, uint8_t resolution, bool calculateVoltage){
-
-    if (x != 36 && x!=39 && x!= 34 && x!=35 && x!= 32 && x!= 33){
+void AnalogJoystick::init (uint8_t x_pin, uint8_t y_pin, uint8_t resolution, uint16_t deadzoneDeviation){
+    if (x_pin != 36 && x_pin != 39 && x_pin != 34 && x_pin != 35 && x_pin != 32 && x_pin != 33){
+#ifdef DEBUG
         Serial.println("X pin is not ADC1");
+#endif
         return;
     }
-    if (y != 36 && y!=39 && y!= 34 && y!=35 && y!= 32 && y!= 33){
+    if (y_pin != 36 && y_pin != 39 && y_pin != 34 && y_pin != 35 && y_pin != 32 && y_pin != 33){
+#ifdef DEBUG
         Serial.println("Y pin is not ADC1");
+#endif
         return;
     }
-    if (x == y) { Serial.println("X === Y"); return;}
-
-    _pinX = x;
-    _pinY = y;
+    if (x_pin == y_pin) {
+#ifdef DEBUG
+        Serial.println("X === Y");
+#endif
+        return;}
+    _pinX = x_pin;
+    _pinY = y_pin;
     pinMode(_pinX, OUTPUT);
     pinMode(_pinY, OUTPUT);
     adc_bits_width_t t;
@@ -27,7 +27,7 @@ void AnalogJoystick::init (uint8_t x, uint8_t y, uint8_t resolution, bool calcul
         case 11: t = ADC_WIDTH_BIT_11; break;
         case 10: t=ADC_WIDTH_BIT_10; break;
         case 9: t=ADC_WIDTH_BIT_9; break;
-        default: {Serial.println("Wrong resolution; Set max"); t=ADC_WIDTH_MAX;}
+        default: {t=ADC_WIDTH_MAX;}
     }
     adc1_config_width(t);
     switch (_pinX) {
@@ -37,7 +37,7 @@ void AnalogJoystick::init (uint8_t x, uint8_t y, uint8_t resolution, bool calcul
         case GPIO_NUM_35: _ADC_ChannelX=ADC1_GPIO35_CHANNEL; break;
         case GPIO_NUM_32: _ADC_ChannelX=ADC1_GPIO32_CHANNEL; break;
         case GPIO_NUM_33: _ADC_ChannelX=ADC1_GPIO33_CHANNEL; break;
-        default:{Serial.println("FuckX"); break;}
+        default:{ break;}
     }
     switch (_pinY) {
         case GPIO_NUM_36: _ADC_ChannelY = ADC1_GPIO36_CHANNEL; break;
@@ -46,54 +46,129 @@ void AnalogJoystick::init (uint8_t x, uint8_t y, uint8_t resolution, bool calcul
         case GPIO_NUM_35: _ADC_ChannelY=ADC1_GPIO35_CHANNEL; break;
         case GPIO_NUM_32: _ADC_ChannelY=ADC1_GPIO32_CHANNEL; break;
         case GPIO_NUM_33: _ADC_ChannelY=ADC1_GPIO33_CHANNEL; break;
-        default:{Serial.println("FuckY"); break;}
+        default:{break;}
     }
-    //adc1_config_channel_atten(_ADC_ChannelX, ADC_ATTEN_DB_0);
-    //adc1_config_channel_atten(_ADC_ChannelY, ADC_ATTEN_DB_0);
-    _calculateVoltage = calculateVoltage;
     _ADC_Resolusion = resolution;
-    maxAdcValue = (1 << _ADC_Resolusion) -1 ;
-    abs_coordinate = (maxAdcValue-1)/2;
+    _maxAdcValue = (1 << _ADC_Resolusion) - 1 ;
+    _abs_coordinateMax = (_maxAdcValue - 1) / 2;
+    _deadzoneDeviation = deadzoneDeviation;
 };
 
+void AnalogJoystick::calibrate(uint16_t deadzoneDeviation) {
+    calculateDeltaXY();
+    _deadzoneDeviation = deadzoneDeviation;
+    setupAbsMaxCoordinates();
+}
 
-void AnalogJoystick::measure(adc1_channel_t ch, Position* pos) const {
-
+int16_t AnalogJoystick::ADCMeasure(adc1_channel_t ch) const {
     uint32_t adc_accumulator = 0;
-    for (uint8_t i = 0; i < NUM_OF_SAMPLES; i++){
+    for (uint8_t i = 0; i < NUM_OF_ADC_SAMPLES; i++){
         adc_accumulator+= adc1_get_raw(ch);
     }
-    Serial.print("ADC_ ACCUM IS "); Serial.print(adc_accumulator);
-    adc_accumulator /= NUM_OF_SAMPLES;
+    adc_accumulator /= NUM_OF_ADC_SAMPLES;
+    int16_t tmpVal= map(adc_accumulator, 0, _maxAdcValue, ((_maxAdcValue) >> 1) - 1, -((_maxAdcValue) >> 1) + 1 );
+    return tmpVal;
+}
 
-    pos->val = map(adc_accumulator, 0, maxAdcValue, -abs_coordinate, abs_coordinate);
-    Serial.printf("max ADC val is %d, abs is %d\n", maxAdcValue, abs_coordinate);
-    Serial.print(" VAl is "); Serial.print(pos->val );
-    if (_calculateVoltage) {
-        pos->voltage = (float) (adc_accumulator * 3.286) / (maxAdcValue+1);
-        Serial.print(" Voltage  IS "); Serial.print(pos->voltage, 4);
+int16_t AnalogJoystick::getRawX1() const {
+    int16_t tmpVal = ADCMeasure(_ADC_ChannelX) - _deltaX;
+    if (abs(tmpVal) <= _deadzoneDeviation) {
+#ifdef DEBUG
+        Serial.printf(" DEADZONE BY X, val is %d \t", tmpVal);
+#endif
+        return 0;
     }
-
+    if (abs(tmpVal) >= _abs_coordinateMax + _deadzoneDeviation) {
+#ifdef DEBUG
+        Serial.printf(" OVERZONE by X, val is %d\t ", tmpVal);
+#endif
+        return 0;
+    }
+    return  tmpVal;
 }
 
-bool AnalogJoystick::isCalculateVoltage() const {
-    return _calculateVoltage;
+int16_t AnalogJoystick::getRawY1() const {
+    int16_t tmpVal = ADCMeasure(_ADC_ChannelY) - _deltaY;
+    if (abs(tmpVal) <= _deadzoneDeviation) {
+#ifdef DEBUG
+        Serial.printf(" DEADZONE BY Y, val is %d \t", tmpVal);
+#endif
+        return 0;
+    }
+    if (abs(tmpVal) > _abs_coordinateMax + _deadzoneDeviation) {
+#ifdef DEBUG
+        Serial.printf(" OVERZONE by Y, val is %d\t ", tmpVal);
+#endif
+        return 0;
+    }
+    return tmpVal;
 }
 
-void AnalogJoystick::setCalculateVoltage(bool calculateVoltage) {
-    _calculateVoltage = calculateVoltage;
+void AnalogJoystick::printState() {
+    JOYSTICK_POS pos;
+    int16_t x = getRawX1();
+    int16_t y = getRawY1();
+    Serial.printf("X is %d Y is %d\n", x, y);
+    if (0==x && 0== y) { pos = IDLE_DEADZONE; Serial.println("IDLE"); return;}
+    if (0==x){
+        if (y > 0){ pos = UP; Serial.println("UP");}
+        else {pos = DOWN; Serial.println("DOWN");}
+        return;
+    }
+    if (0==y){
+        if (x > 0){ pos = RIGHT; Serial.println("RIGHT");}
+        else {pos = LEFT; Serial.println("LEFT");}
+        return;
+    }
+    if (x > 0){
+        if (y > 0){pos = UP_RIGHT; Serial.println("UP_RIGHT");}
+        else {pos = DOWN_RIGHT; Serial.println("DOWN_RIGHT");}
+        return;
+    }
+    if (x < 0){
+        if (y > 0){pos = UP_LEFT; Serial.println("UP_LEFT");}
+        else {pos = DOWN_LEFT; Serial.println("DOWN_LEFT");}
+        return;
+    }
 }
 
-void AnalogJoystick::calibrate() {
-    Position oldX = _posX;
-    Position  oldY = _posY;
+void AnalogJoystick::calculateDeltaXY() {
+    int32_t accumulator;
+    accumulator = 0;
+    for (uint8_t i = 0; i<NUM_OF_DELTA_SAMPLES; i++){
+        accumulator+= ADCMeasure(_ADC_ChannelX);
+    }
+    _deltaX = (int16_t)(accumulator / NUM_OF_DELTA_SAMPLES);
+#ifdef DEBUG
+    Serial.printf("_deltaX is  %d acc %d\n", _deltaX, accumulator);
+#endif
+    accumulator = 0;
+    for (uint8_t i = 0; i<NUM_OF_DELTA_SAMPLES; i++){
+        accumulator+= ADCMeasure(_ADC_ChannelY);
+    }
+    _deltaY = (int16_t)(accumulator / NUM_OF_DELTA_SAMPLES);
+#ifdef DEBUG
+    Serial.printf("_deltaY is  %d ac %d\n", _deltaY, accumulator);
+#endif
+}
+
+void AnalogJoystick::setupAbsMaxCoordinates() {
     uint32_t time = millis();
-    measure(_ADC_ChannelX, &_posX);
-    measure(_ADC_ChannelY, &_posY);
+    int16_t localX = getRawX1();
+    int16_t localY = getRawY1();
     time = millis() - time;
     Serial.printf("Measuring X and Y took %d milliseconds\n", time);
-
-
-
-
+    Serial.printf("X is %d Y is %d\n", localX, localX);
+    Serial.println ("Set max LEFT THEN BOTOOM and print to serial \n");
+    while (Serial.available()) Serial.read();
+    while (!Serial.available()) {delay(1);}
+    localX = getRawX1();
+    Serial.printf("LEFT X is %d\n", localX);
+    while (Serial.available()) Serial.read();
+    while (!Serial.available()) {delay(1);}
+    localY = getRawY1();
+    Serial.printf("BOTTOM Y is %d\n", localY);
+    _abs_coordinateMax = (localX >= localY) ? localY : localX; // get min
 }
+
+
