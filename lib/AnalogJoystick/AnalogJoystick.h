@@ -3,6 +3,7 @@
 
 #define NUM_OF_ADC_SAMPLES 20
 #define NUM_OF_DELTA_SAMPLES 100
+#define DEBUG
 
 enum JOYSTICK_POS{
     UP = 1,
@@ -37,8 +38,8 @@ private:
     uint16_t _abs_coordinateMax; // -abs_coord ... + abs_coord are bounds on X and Y
     uint16_t _maxAdcValue;
     uint16_t _deadzoneDeviation;
-    uint16_t _deltaX;
-    uint16_t _deltaY;
+    int16_t _deltaX;
+    int16_t _deltaY;
 
     int16_t  ADCMeasure(adc1_channel_t ch) const;
     void calculateDeltaXY();

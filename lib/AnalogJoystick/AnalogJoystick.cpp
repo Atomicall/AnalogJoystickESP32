@@ -51,6 +51,7 @@ void AnalogJoystick::init (uint8_t x_pin, uint8_t y_pin, uint8_t resolution, uin
     _ADC_Resolusion = resolution;
     _maxAdcValue = (1 << _ADC_Resolusion) - 1 ;
     _abs_coordinateMax = (_maxAdcValue - 1) / 2;
+    Serial.printf("INIT _abs_coordinateMax %d", _abs_coordinateMax);
     _deadzoneDeviation = deadzoneDeviation;
 };
 
@@ -91,13 +92,13 @@ int16_t AnalogJoystick::getRawY1() const {
     int16_t tmpVal = ADCMeasure(_ADC_ChannelY) - _deltaY;
     if (abs(tmpVal) <= _deadzoneDeviation) {
 #ifdef DEBUG
-        Serial.printf(" DEADZONE BY Y, val is %d \t", tmpVal);
+        Serial.printf(" DEADZONE BY Y, val is %d <= %d \t", tmpVal, _deadzoneDeviation);
 #endif
         return 0;
     }
     if (abs(tmpVal) > _abs_coordinateMax + _deadzoneDeviation) {
 #ifdef DEBUG
-        Serial.printf(" OVERZONE by Y, val is %d\t ", tmpVal);
+        Serial.printf(" OVERZONE by Y, val is %d > %d\t ", tmpVal, _abs_coordinateMax + _deadzoneDeviation);
 #endif
         return 0;
     }
@@ -154,19 +155,19 @@ void AnalogJoystick::calculateDeltaXY() {
 
 void AnalogJoystick::setupAbsMaxCoordinates() {
     uint32_t time = millis();
-    int16_t localX = getRawX1();
-    int16_t localY = getRawY1();
+    int16_t localX =  ADCMeasure(_ADC_ChannelX);
+    int16_t localY =  ADCMeasure(_ADC_ChannelY);
     time = millis() - time;
     Serial.printf("Measuring X and Y took %d milliseconds\n", time);
     Serial.printf("X is %d Y is %d\n", localX, localX);
     Serial.println ("Set max LEFT THEN BOTOOM and print to serial \n");
     while (Serial.available()) Serial.read();
     while (!Serial.available()) {delay(1);}
-    localX = getRawX1();
+    localX = ADCMeasure(_ADC_ChannelX);
     Serial.printf("LEFT X is %d\n", localX);
     while (Serial.available()) Serial.read();
     while (!Serial.available()) {delay(1);}
-    localY = getRawY1();
+    localY = ADCMeasure(_ADC_ChannelY);
     Serial.printf("BOTTOM Y is %d\n", localY);
     _abs_coordinateMax = (localX >= localY) ? localY : localX; // get min
 }
